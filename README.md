@@ -214,6 +214,8 @@ hooks from `/hooks`. After changing the plugin, start a new Codex task so the
 new hook bundle is loaded. The portable root `plugin.json` selects
 `hooks/codex-hooks.json`; `hooks/hooks.json` remains the compatibility/default
 entry point and includes the existing Claude module in `hooks/fast-jev.ts`.
+The Git-installed plugin runs the committed `dist/*.js` runtime, so run
+`npm run build` before publishing changes.
 
 The CLI remains available for manual diagnostics and offline plan inspection:
 
