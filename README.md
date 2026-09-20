@@ -247,6 +247,7 @@ tracked plugin files:
 | `FAST_JEV_MAX_STATE_TOKENS` | `25000` | Fitted Jev state ceiling |
 | `FAST_JEV_MAX_REQUEST_TOKENS` | `30000` | Fitted request ceiling |
 | `FAST_JEV_TRUNCATE_HEAD_CHARS` | `300` | Result head retained for a dropped result |
+| `FAST_JEV_TRACE_FILE` | `~/.config/fast-jev-compaction/events.jsonl` | Optional local JSONL trace consumed by the live viewer |
 | `FAST_JEV_CONFIG` | unset | Optional path to another env-style config file |
 | `PLUGIN_DATA` | host-defined | Directory for the pending per-session recovery note |
 
@@ -268,16 +269,20 @@ TYPESAFE_API_KEY="$(cat ~/.typesafe_key)" npm run demo
 The unit tests use a fake Jev and never contact TypeSafe. The demo is the live
 network check.
 
-## Animated demo (macOS)
+## Live demo (macOS)
 
-`demo/JevDemo` is a small native SwiftUI app that plays a scripted, dramatized
-version of the compaction flow inside a Claude Code-style terminal: the tool
-calls of a canned transcript are scored, results and calls Jev lets go turn red
-and collapse away, and the rest stays verbatim. It never calls the API; it
-exists to be screen recorded.
+`demo/JevDemo` is a native SwiftUI viewer for the real Codex hook trace. It
+waits for `PreCompact`, shows the rollout parsing and TypeSafe request, renders
+the returned Jev decisions for each tool call, and then shows the recovery note
+being loaded at `SessionStart(source=compact)`. The viewer itself never sees
+the API key and never makes the TypeSafe request; the Codex hook does that.
 
 ```sh
-demo/JevDemo/build.sh   # builds demo/JevDemo/build/JevDemo.app and launches it
+demo/JevDemo/build.sh             # builds and launches the live viewer
+# Start a new Codex session and trigger native manual or automatic compaction.
 ```
 
-Press space in the app to replay from the start.
+The viewer reads `~/.config/fast-jev-compaction/events.jsonl`. Use the trash
+button before a test to clear old events. There is no scripted fallback in this
+viewer: an empty window means that no real Codex lifecycle event has arrived
+yet.

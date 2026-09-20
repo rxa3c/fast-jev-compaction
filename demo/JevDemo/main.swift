@@ -1,6 +1,8 @@
-import AppKit
+import Foundation
 import SwiftUI
 
+// The former canned animation is intentionally not compiled; this app is live-only.
+#if false
 // MARK: - Model
 
 enum Role { case user, assistant, toolHeader, toolLine }
@@ -549,6 +551,483 @@ struct Spinner: View {
     }
 }
 
+#endif
+
+// MARK: - Live trace viewer
+
+enum Palette {
+    static let bg = Color(red: 0.07, green: 0.07, blue: 0.09)
+    static let panel = Color(red: 0.10, green: 0.10, blue: 0.12)
+    static let fg = Color(red: 0.90, green: 0.90, blue: 0.92)
+    static let dim = Color(red: 0.52, green: 0.53, blue: 0.58)
+    static let border = Color(red: 0.24, green: 0.24, blue: 0.28)
+    static let orange = Color(red: 0.85, green: 0.47, blue: 0.24)
+    static let green = Color(red: 0.30, green: 0.85, blue: 0.48)
+    static let red = Color(red: 0.96, green: 0.30, blue: 0.33)
+    static let amber = Color(red: 0.98, green: 0.72, blue: 0.24)
+    static let cyan = Color(red: 0.40, green: 0.78, blue: 0.95)
+}
+
+let mono = Font.system(size: 15, design: .monospaced)
+let monoSmall = Font.system(size: 12.5, design: .monospaced)
+
+struct TraceAction: Identifiable, Decodable {
+    let id: String
+    let callId: String
+    let tool: String
+    let action: String
+    let reason: String
+    let keepCall: Double
+    let keepResult: Double
+    let inputPreview: String
+    let resultPreview: String?
+    let resultOmittedChars: Int?
+}
+
+struct TraceEvent: Identifiable, Decodable {
+    let id: String
+    let timestamp: String
+    let event: String
+    let sessionId: String?
+    let trigger: String?
+    let source: String?
+    let transcriptPath: String?
+    let lineCount: Int?
+    let activeItemCount: Int?
+    let calls: Int?
+    let requests: Int?
+    let model: String?
+    let callCount: Int?
+    let questionCount: Int?
+    let answerCount: Int?
+    let stateChars: Int?
+    let durationMs: Int?
+    let reductionRatio: Double?
+    let summary: String?
+    let reason: String?
+    let error: String?
+    let noteChars: Int?
+    let actions: [TraceAction]?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, timestamp, event, sessionId, trigger, source, transcriptPath
+        case lineCount, activeItemCount, calls, requests, model, callCount, questionCount, answerCount, stateChars
+        case durationMs, reductionRatio, summary, reason, error, noteChars, actions
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        timestamp = try values.decodeIfPresent(String.self, forKey: .timestamp) ?? ""
+        event = try values.decodeIfPresent(String.self, forKey: .event) ?? "unknown"
+        id = try values.decodeIfPresent(String.self, forKey: .id)
+            ?? "\(timestamp)-\(event)-\(UUID().uuidString)"
+        sessionId = try values.decodeIfPresent(String.self, forKey: .sessionId)
+        trigger = try values.decodeIfPresent(String.self, forKey: .trigger)
+        source = try values.decodeIfPresent(String.self, forKey: .source)
+        transcriptPath = try values.decodeIfPresent(String.self, forKey: .transcriptPath)
+        lineCount = try values.decodeIfPresent(Int.self, forKey: .lineCount)
+        activeItemCount = try values.decodeIfPresent(Int.self, forKey: .activeItemCount)
+        calls = try values.decodeIfPresent(Int.self, forKey: .calls)
+        requests = try values.decodeIfPresent(Int.self, forKey: .requests)
+        model = try values.decodeIfPresent(String.self, forKey: .model)
+        callCount = try values.decodeIfPresent(Int.self, forKey: .callCount)
+        questionCount = try values.decodeIfPresent(Int.self, forKey: .questionCount)
+        answerCount = try values.decodeIfPresent(Int.self, forKey: .answerCount)
+        stateChars = try values.decodeIfPresent(Int.self, forKey: .stateChars)
+        durationMs = try values.decodeIfPresent(Int.self, forKey: .durationMs)
+        reductionRatio = try values.decodeIfPresent(Double.self, forKey: .reductionRatio)
+        summary = try values.decodeIfPresent(String.self, forKey: .summary)
+        reason = try values.decodeIfPresent(String.self, forKey: .reason)
+        error = try values.decodeIfPresent(String.self, forKey: .error)
+        noteChars = try values.decodeIfPresent(Int.self, forKey: .noteChars)
+        actions = try values.decodeIfPresent([TraceAction].self, forKey: .actions)
+    }
+}
+
+@MainActor
+final class LiveTraceStore: ObservableObject {
+    @Published private(set) var events: [TraceEvent] = []
+    let path: String
+
+    init() {
+        let environment = ProcessInfo.processInfo.environment
+        if let configured = environment["FAST_JEV_TRACE_FILE"], !configured.isEmpty {
+            path = NSString(string: configured).expandingTildeInPath
+        } else {
+            path = (NSHomeDirectory() as NSString).appendingPathComponent(
+                ".config/fast-jev-compaction/events.jsonl"
+            )
+        }
+        reload()
+    }
+
+    var displayPath: String {
+        path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+    }
+
+    func reload() {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+              let text = String(data: data, encoding: .utf8) else {
+            if !events.isEmpty { events = [] }
+            return
+        }
+
+        let decoder = JSONDecoder()
+        let parsed = text.split(whereSeparator: \.isNewline).compactMap { line -> TraceEvent? in
+            guard let data = String(line).data(using: .utf8) else { return nil }
+            return try? decoder.decode(TraceEvent.self, from: data)
+        }
+        events = Array(parsed.suffix(500))
+    }
+
+    func clear() {
+        let url = URL(fileURLWithPath: path)
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try? Data().write(to: url, options: .atomic)
+        events = []
+    }
+}
+
+func traceLabel(_ event: String) -> String {
+    switch event {
+    case "precompact_started": return "PreCompact started"
+    case "rollout_parsed": return "Codex history parsed"
+    case "jev_request_started": return "TypeSafe request started"
+    case "jev_response_received": return "Jev response received"
+    case "jev_request_failed": return "TypeSafe request failed"
+    case "plan_ready": return "Jev plan ready"
+    case "recovery_note_ready": return "Recovery note prepared"
+    case "session_start_received": return "SessionStart received"
+    case "recovery_note_loaded": return "Recovery note loaded"
+    case "recovery_note_missing": return "Recovery note unavailable"
+    case "fallback": return "Native fallback"
+    default: return event.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+}
+
+func traceColor(_ event: String) -> Color {
+    switch event {
+    case "jev_request_failed", "fallback", "recovery_note_missing": return Palette.red
+    case "jev_response_received", "plan_ready", "recovery_note_ready", "recovery_note_loaded": return Palette.green
+    case "jev_request_started", "precompact_started", "rollout_parsed": return Palette.cyan
+    default: return Palette.dim
+    }
+}
+
+func shortTimestamp(_ timestamp: String) -> String {
+    if timestamp.count >= 19 {
+        return String(timestamp.dropFirst(11).prefix(8))
+    }
+    return timestamp
+}
+
+struct LiveEventRow: View {
+    let event: TraceEvent
+    let selected: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Circle()
+                .fill(traceColor(event.event))
+                .frame(width: 7, height: 7)
+                .padding(.top, 5)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(traceLabel(event.event))
+                        .bold()
+                        .foregroundStyle(Palette.fg)
+                    Spacer()
+                    Text(shortTimestamp(event.timestamp))
+                        .foregroundStyle(Palette.dim)
+                }
+                Text(event.summary ?? event.reason ?? event.error ?? event.event)
+                    .foregroundStyle(Palette.dim)
+                    .lineLimit(2)
+            }
+        }
+        .font(monoSmall)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 5)
+                .fill(selected ? Palette.cyan.opacity(0.12) : Palette.panel.opacity(0.45))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 5)
+                .stroke(selected ? Palette.cyan.opacity(0.65) : Palette.border.opacity(0.45), lineWidth: 1)
+        )
+    }
+}
+
+struct LiveActionView: View {
+    let action: TraceAction
+
+    var color: Color {
+        switch action.action {
+        case "drop_call": return Palette.red
+        case "drop_result": return Palette.amber
+        default: return Palette.green
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(action.tool).bold().foregroundStyle(Palette.fg)
+                Text(action.callId).foregroundStyle(Palette.dim)
+                Spacer()
+                Text(action.action.uppercased())
+                    .bold()
+                    .foregroundStyle(color)
+            }
+            Text("call \(String(format: "%.2f", action.keepCall)) · result \(String(format: "%.2f", action.keepResult)) · \(action.reason)")
+                .foregroundStyle(color.opacity(0.85))
+            Text("input: \(action.inputPreview)")
+                .foregroundStyle(Palette.dim)
+                .lineLimit(4)
+            if let result = action.resultPreview {
+                Text("result: \(result)")
+                    .foregroundStyle(Palette.dim)
+                    .lineLimit(6)
+            }
+        }
+        .font(monoSmall)
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 5).fill(color.opacity(0.08)))
+        .overlay(RoundedRectangle(cornerRadius: 5).stroke(color.opacity(0.35), lineWidth: 1))
+    }
+}
+
+struct LiveEventDetail: View {
+    let event: TraceEvent
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Text(traceLabel(event.event))
+                        .font(.system(size: 20, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(traceColor(event.event))
+                    Spacer()
+                    Text(shortTimestamp(event.timestamp))
+                        .font(monoSmall)
+                        .foregroundStyle(Palette.dim)
+                }
+
+                metadata
+
+                if let summary = event.summary {
+                    detailBlock(title: "Summary", text: summary)
+                }
+                if let reason = event.reason {
+                    detailBlock(title: "Reason", text: reason)
+                }
+                if let error = event.error {
+                    detailBlock(title: "Error", text: error)
+                }
+                if let actions = event.actions, !actions.isEmpty {
+                    Text("Jev decisions (\(actions.count))")
+                        .font(mono)
+                        .foregroundStyle(Palette.fg)
+                    ForEach(actions) { action in
+                        LiveActionView(action: action)
+                    }
+                }
+            }
+            .padding(22)
+        }
+    }
+
+    var metadata: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let sessionId = event.sessionId { metadataLine("session", sessionId) }
+            if let trigger = event.trigger { metadataLine("trigger", trigger) }
+            if let source = event.source { metadataLine("source", source) }
+            if let transcriptPath = event.transcriptPath { metadataLine("rollout", transcriptPath) }
+            if let lineCount = event.lineCount { metadataLine("rollout lines", "\(lineCount)") }
+            if let activeItemCount = event.activeItemCount { metadataLine("active items", "\(activeItemCount)") }
+            if let calls = event.calls { metadataLine("paired calls", "\(calls)") }
+            if let requests = event.requests { metadataLine("requests", "\(requests)") }
+            if let model = event.model { metadataLine("model", model) }
+            if let callCount = event.callCount { metadataLine("tool calls", "\(callCount)") }
+            if let questionCount = event.questionCount { metadataLine("Jev questions", "\(questionCount)") }
+            if let answerCount = event.answerCount { metadataLine("Jev answers", "\(answerCount)") }
+            if let stateChars = event.stateChars { metadataLine("state", "\(stateChars) chars") }
+            if let durationMs = event.durationMs { metadataLine("duration", "\(durationMs) ms") }
+            if let reductionRatio = event.reductionRatio {
+                metadataLine("reduction", "\(Int(reductionRatio * 100))%")
+            }
+            if let noteChars = event.noteChars { metadataLine("note", "\(noteChars) chars") }
+        }
+        .font(monoSmall)
+    }
+
+    func metadataLine(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(label).foregroundStyle(Palette.dim).frame(width: 112, alignment: .leading)
+            Text(value).foregroundStyle(Palette.fg).textSelection(.enabled)
+        }
+    }
+
+    func detailBlock(title: String, text: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).foregroundStyle(Palette.fg)
+            Text(text)
+                .foregroundStyle(Palette.dim)
+                .textSelection(.enabled)
+        }
+        .font(monoSmall)
+    }
+}
+
+struct LiveRootView: View {
+    @StateObject private var store = LiveTraceStore()
+    @State private var selectedID: String?
+    private let poller = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
+
+    var selectedEvent: TraceEvent? {
+        guard let selectedID else { return store.events.last }
+        return store.events.first { $0.id == selectedID } ?? store.events.last
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider().overlay(Palette.border)
+            HStack(spacing: 0) {
+                eventStream
+                    .frame(width: 470)
+                Divider().overlay(Palette.border)
+                detail
+            }
+        }
+        .frame(minWidth: 1240, minHeight: 780)
+        .background(Palette.bg)
+        .onAppear { selectedID = store.events.last?.id }
+        .onReceive(poller) { _ in
+            store.reload()
+            if selectedID == nil || !store.events.contains(where: { $0.id == selectedID }) {
+                selectedID = store.events.last?.id
+            }
+        }
+    }
+
+    var header: some View {
+        HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Circle().fill(Palette.green).frame(width: 8, height: 8)
+                    Text("fast-jev-codex").bold().foregroundStyle(Palette.fg)
+                    Text("LIVE TRACE").foregroundStyle(Palette.cyan)
+                }
+                Text("Watching real Codex PreCompact and SessionStart hooks")
+                    .foregroundStyle(Palette.dim)
+            }
+            Spacer()
+            Text("\(store.events.count) events")
+                .foregroundStyle(Palette.dim)
+                .font(monoSmall)
+            Button {
+                store.clear()
+                selectedID = nil
+            } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(Palette.dim)
+            .help("Clear the local trace before a new test")
+        }
+        .font(monoSmall)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .background(Palette.panel)
+    }
+
+    var eventStream: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("EVENT STREAM").foregroundStyle(Palette.fg)
+                Spacer()
+                Text("polling").foregroundStyle(Palette.dim)
+            }
+            .font(monoSmall)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            Divider().overlay(Palette.border)
+
+            if store.events.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Spacer()
+                    Text("Waiting for a real Codex hook…")
+                        .foregroundStyle(Palette.amber)
+                    Text("Start a new Codex session, then trigger native compaction.")
+                        .foregroundStyle(Palette.dim)
+                    Text(store.displayPath)
+                        .foregroundStyle(Palette.dim)
+                        .lineLimit(2)
+                    Spacer()
+                }
+                .font(monoSmall)
+                .padding(18)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical, showsIndicators: false) {
+                        LazyVStack(alignment: .leading, spacing: 6) {
+                            ForEach(store.events) { event in
+                                Button {
+                                    selectedID = event.id
+                                } label: {
+                                    LiveEventRow(event: event, selected: selectedID == event.id)
+                                }
+                                .buttonStyle(.plain)
+                                .id(event.id)
+                            }
+                        }
+                        .padding(10)
+                    }
+                    .onChange(of: store.events.count) { _, _ in
+                        if let id = store.events.last?.id {
+                            withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(id, anchor: .bottom) }
+                        }
+                    }
+                }
+            }
+        }
+        .background(Palette.bg)
+    }
+
+    var detail: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let event = selectedEvent {
+                LiveEventDetail(event: event)
+            } else {
+                Spacer()
+                HStack {
+                    Spacer()
+                    Text("Select a real hook event")
+                        .foregroundStyle(Palette.dim)
+                    Spacer()
+                }
+                Spacer()
+            }
+            Divider().overlay(Palette.border)
+            HStack {
+                Text("trace file").foregroundStyle(Palette.dim)
+                Text(store.displayPath).foregroundStyle(Palette.fg).textSelection(.enabled)
+                Spacer()
+            }
+            .font(monoSmall)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 9)
+            .background(Palette.panel)
+        }
+    }
+}
+
+#if false
 struct RootView: View {
     @StateObject private var demo = Demo()
 
@@ -579,12 +1058,13 @@ struct RootView: View {
         }
     }
 }
+#endif
 
 @main
 struct JevDemoApp: App {
     var body: some Scene {
         WindowGroup {
-            RootView()
+            LiveRootView()
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)

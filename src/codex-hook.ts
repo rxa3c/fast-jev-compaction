@@ -7,6 +7,10 @@ import { fileURLToPath } from 'node:url';
 import { JevClient } from './client.js';
 import { loadConfigEnvironment, type Environment } from './config.js';
 import {
+  appendCodexTrace,
+  type CodexTraceEventInput,
+} from './codex-trace.js';
+import {
   buildCodexPlan,
   parseCodexRollout,
   renderCodexRecoveryNote,
@@ -53,6 +57,11 @@ export interface CodexHookOutput {
 export interface CodexHookDependencies {
   /** Injectable Jev transport for tests; production uses JevClient. */
   asker?: JevAsker;
+  /** Injectable live trace sink; trace failures never affect the hook result. */
+  trace?: (
+    event: CodexTraceEventInput,
+    environment: Environment,
+  ) => Promise<void>;
   /** Injectable plugin data directory for tests. */
   dataRoot?: string;
   /** Injectable clock for deterministic pending state and plans. */
@@ -244,6 +253,65 @@ function planSummary(plan: Awaited<ReturnType<typeof buildCodexPlan>>): string {
   return `${ratio}% reduction; ${plan.stats.calls} paired call(s), ${plan.stats.requests} request(s)`;
 }
 
+async function emitTrace(
+  input: CodexHookInput,
+  environment: Environment,
+  dependencies: CodexHookDependencies,
+  event: string,
+  fields: Record<string, unknown> = {},
+): Promise<void> {
+  if (!dependencies.trace) return;
+  try {
+    await dependencies.trace(
+      {
+        event,
+        timestamp: currentTime(dependencies),
+        sessionId: input.session_id,
+        ...fields,
+      },
+      environment,
+    );
+  } catch {
+    // The live viewer is optional and must never affect native compaction.
+  }
+}
+
+function tracedAsker(
+  asker: JevAsker,
+  input: CodexHookInput,
+  environment: Environment,
+  dependencies: CodexHookDependencies,
+  model: string,
+): JevAsker {
+  if (!dependencies.trace) return asker;
+  return {
+    async ask(state, questions) {
+      const questionCount = Object.keys(questions).length;
+      const startedAt = Date.now();
+      await emitTrace(input, environment, dependencies, 'jev_request_started', {
+        model,
+        questionCount,
+        callCount: Math.ceil(questionCount / 2),
+        stateChars: JSON.stringify(state).length,
+      });
+      try {
+        const response = await asker.ask(state, questions);
+        await emitTrace(input, environment, dependencies, 'jev_response_received', {
+          durationMs: Date.now() - startedAt,
+          answerCount: Object.keys(response.answers).length,
+        });
+        return response;
+      } catch (error) {
+        await emitTrace(input, environment, dependencies, 'jev_request_failed', {
+          durationMs: Date.now() - startedAt,
+          error: errorText(error),
+        });
+        throw error;
+      }
+    },
+  };
+}
+
 async function runPreCompact(
   input: CodexHookInput,
   environment: Environment,
@@ -253,6 +321,11 @@ async function runPreCompact(
   const createdAt = currentTime(dependencies);
   const statePath = pendingPath(input, environment, dependencies);
 
+  await emitTrace(input, environment, dependencies, 'precompact_started', {
+    trigger: input.trigger,
+    transcriptPath: input.transcript_path,
+  });
+
   if (!input.transcript_path) {
     await savePendingBestEffort(statePath, {
       schemaVersion: 1,
@@ -260,12 +333,18 @@ async function runPreCompact(
       createdAt,
       error: 'Codex did not provide transcript_path',
     });
+    await emitTrace(input, environment, dependencies, 'fallback', {
+      reason: 'Codex did not provide transcript_path',
+    });
     return fallbackMessage('transcript_path was not provided');
   }
 
   try {
     const readRollout = dependencies.readRollout ?? ((path: string) => readFile(path, 'utf8'));
     const lines = parseCodexRollout(await readRollout(input.transcript_path));
+    await emitTrace(input, environment, dependencies, 'rollout_parsed', {
+      lineCount: lines.length,
+    });
     let asker = dependencies.asker;
     if (!asker) {
       const apiKey = environment.TYPESAFE_API_KEY;
@@ -274,11 +353,32 @@ async function runPreCompact(
     }
     const plan = await buildCodexPlan(
       lines,
-      asker,
+      tracedAsker(asker, input, environment, dependencies, config.model),
       planOptions(config, input, createdAt),
     );
     const ratio = reductionRatio(plan);
     const summary = planSummary(plan);
+
+    await emitTrace(input, environment, dependencies, 'plan_ready', {
+      summary,
+      reductionRatio: ratio,
+      activeItemCount: plan.activeWindow.itemCount,
+      latestCompactionLineIndex: plan.activeWindow.latestCompactionLineIndex,
+      calls: plan.stats.calls,
+      requests: plan.stats.requests,
+      actions: plan.actions.map((action) => ({
+        id: action.id,
+        callId: action.callId,
+        tool: action.tool,
+        action: action.action,
+        reason: action.reason,
+        keepCall: action.keepCall,
+        keepResult: action.keepResult,
+        inputPreview: action.inputPreview,
+        resultPreview: action.resultPreview,
+        resultOmittedChars: action.resultOmittedChars,
+      })),
+    });
 
     if (ratio < config.minReductionRatio) {
       await savePendingBestEffort(statePath, {
@@ -294,6 +394,12 @@ async function runPreCompact(
           config.minReductionRatio * 100,
         )}% minimum`,
       );
+      await emitTrace(input, environment, dependencies, 'fallback', {
+        reason: `Jev reduction ${Math.round(ratio * 100)}% is below the configured ${Math.round(
+          config.minReductionRatio * 100,
+        )}% minimum`,
+        summary,
+      });
     }
 
     const note = renderCodexRecoveryNote(plan);
@@ -308,8 +414,17 @@ async function runPreCompact(
         note,
       });
     } catch (error) {
+      await emitTrace(input, environment, dependencies, 'fallback', {
+        reason: `could not persist recovery note: ${errorText(error)}`,
+        summary,
+      });
       return fallbackMessage(`could not persist recovery note: ${errorText(error)}`);
     }
+
+    await emitTrace(input, environment, dependencies, 'recovery_note_ready', {
+      summary,
+      noteChars: note.length,
+    });
 
     return {
       systemMessage: `fast-jev-codex: recovery note prepared before native Codex compaction (${summary}).`,
@@ -321,6 +436,9 @@ async function runPreCompact(
       createdAt,
       rolloutPath: input.transcript_path,
       error: errorText(error),
+    });
+    await emitTrace(input, environment, dependencies, 'fallback', {
+      reason: errorText(error),
     });
     return fallbackMessage(errorText(error));
   }
@@ -338,13 +456,23 @@ async function runCompactSessionStart(
   dependencies: CodexHookDependencies,
 ): Promise<CodexHookOutput> {
   const path = pendingPath(input, environment, dependencies);
+  await emitTrace(input, environment, dependencies, 'session_start_received', {
+    source: input.source,
+  });
   const pending = await readPending(path);
-  if (!pending || pending.consumedAt) return {};
+  if (!pending || pending.consumedAt) {
+    await emitTrace(input, environment, dependencies, 'session_start_no_pending');
+    return {};
+  }
 
   const consumed = { ...pending, consumedAt: currentTime(dependencies) };
   await savePendingBestEffort(path, consumed);
 
   if (pending.status !== 'ready' || !pending.note) {
+    await emitTrace(input, environment, dependencies, 'recovery_note_missing', {
+      status: pending.status,
+      error: pending.error,
+    });
     return {
       systemMessage:
         'fast-jev-codex: native Codex compaction completed without a Jev recovery note.',
@@ -357,6 +485,10 @@ async function runCompactSessionStart(
     '',
     boundedNote(pending.note),
   ].join('\n');
+  await emitTrace(input, environment, dependencies, 'recovery_note_loaded', {
+    summary: pending.summary,
+    noteChars: pending.note.length,
+  });
   return {
     systemMessage: 'fast-jev-codex: recovery note loaded after native compaction.',
     hookSpecificOutput: {
@@ -364,6 +496,20 @@ async function runCompactSessionStart(
       additionalContext,
     },
   };
+}
+
+async function runSessionStart(
+  input: CodexHookInput,
+  environment: Environment,
+  dependencies: CodexHookDependencies,
+): Promise<CodexHookOutput> {
+  if (input.source === 'compact') {
+    return runCompactSessionStart(input, environment, dependencies);
+  }
+  await emitTrace(input, environment, dependencies, 'session_start_received', {
+    source: input.source,
+  });
+  return {};
 }
 
 export async function runCodexHook(
@@ -375,11 +521,15 @@ export async function runCodexHook(
     environment === process.env
       ? await loadConfigEnvironment(environment)
       : environment;
+  const tracedDependencies =
+    dependencies.trace || environment !== process.env
+      ? dependencies
+      : { ...dependencies, trace: appendCodexTrace };
   if (input.hook_event_name === 'PreCompact') {
-    return runPreCompact(input, effectiveEnvironment, dependencies);
+    return runPreCompact(input, effectiveEnvironment, tracedDependencies);
   }
-  if (input.hook_event_name === 'SessionStart' && input.source === 'compact') {
-    return runCompactSessionStart(input, effectiveEnvironment, dependencies);
+  if (input.hook_event_name === 'SessionStart') {
+    return runSessionStart(input, effectiveEnvironment, tracedDependencies);
   }
   return {};
 }

@@ -103,6 +103,7 @@ describe('Codex lifecycle hook', () => {
   it('persists a Jev note before compaction and injects it after native rollover', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'fast-jev-codex-hook-'));
     try {
+      const traceEvents: Array<Record<string, unknown>> = [];
       const input = {
         session_id: 'session/one',
         transcript_path: '/tmp/fixture.jsonl',
@@ -114,6 +115,9 @@ describe('Codex lifecycle hook', () => {
         now: fixedNow,
         readRollout: async () => rolloutFixture(),
         asker: fakeJev(() => 0.1),
+        trace: async (event) => {
+          traceEvents.push(event);
+        },
       };
 
       const before = await runCodexHook(
@@ -140,6 +144,20 @@ describe('Codex lifecycle hook', () => {
         'Fast Jev recovery note',
       );
       expect(after.hookSpecificOutput?.additionalContext).toContain('history');
+      expect(traceEvents.map((event) => event.event)).toEqual(
+        expect.arrayContaining([
+          'precompact_started',
+          'rollout_parsed',
+          'jev_request_started',
+          'jev_response_received',
+          'plan_ready',
+          'recovery_note_ready',
+          'session_start_received',
+          'recovery_note_loaded',
+        ]),
+      );
+      const planEvent = traceEvents.find((event) => event.event === 'plan_ready');
+      expect(planEvent?.actions).toHaveLength(1);
     } finally {
       await rm(dataRoot, { recursive: true, force: true });
     }
