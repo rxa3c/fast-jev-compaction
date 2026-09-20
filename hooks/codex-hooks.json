@@ -1,5 +1,4 @@
 {
-  "modules": ["./fast-jev.ts"],
   "hooks": {
     "PreCompact": [
       {

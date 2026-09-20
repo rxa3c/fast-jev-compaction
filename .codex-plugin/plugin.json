@@ -1,0 +1,28 @@
+{
+  "name": "fast-jev-codex",
+  "version": "0.2.0",
+  "description": "Jev-guided Codex compaction support that preserves high-value tool history through native context rollover.",
+  "author": {
+    "name": "Tamara Tran",
+    "url": "https://github.com/tamaratran"
+  },
+  "homepage": "https://github.com/rxa3c/fast-jev-compaction",
+  "repository": "https://github.com/rxa3c/fast-jev-compaction",
+  "license": "MIT",
+  "keywords": ["codex", "context", "compaction", "history", "notes", "jev"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Fast Jev for Codex",
+    "shortDescription": "Use Jev to select useful Codex history for notes",
+    "longDescription": "Reviews the latest Codex history window with Jev and produces a notes-ready recovery plan while keeping Codex native history, notes, and context rollover as the source of truth.",
+    "developerName": "Tamara Tran",
+    "category": "Developer Tools",
+    "capabilities": ["Analysis", "Lifecycle hooks"],
+    "websiteURL": "https://github.com/rxa3c/fast-jev-compaction",
+    "defaultPrompt": [
+      "Review my current Codex history with Jev.",
+      "Create a native Codex recovery note.",
+      "Find old tool results worth keeping."
+    ]
+  }
+}

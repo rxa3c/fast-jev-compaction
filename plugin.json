@@ -1,0 +1,33 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "fast-jev-codex",
+  "version": "0.2.0",
+  "description": "Jev-guided context compaction for Claude Code and Codex with native history and notes recovery.",
+  "author": {
+    "name": "Tamara Tran",
+    "url": "https://github.com/tamaratran"
+  },
+  "homepage": "https://github.com/rxa3c/fast-jev-compaction",
+  "repository": "https://github.com/rxa3c/fast-jev-compaction",
+  "license": "MIT",
+  "keywords": ["codex", "claude", "context", "compaction", "history", "notes", "jev"],
+  "extensions": {
+    "com.openai": {
+      "hooks": "./hooks/codex-hooks.json",
+      "interface": {
+        "displayName": "Fast Jev Compaction",
+        "shortDescription": "Preserve useful history across native context rollover",
+        "longDescription": "Uses TypeSafe Jev to select high-value Codex tool history before native compaction and injects a bounded recovery note afterward without rewriting Codex history or notes.",
+        "developerName": "Tamara Tran",
+        "category": "Developer Tools",
+        "capabilities": ["Analysis", "Lifecycle hooks"],
+        "websiteURL": "https://github.com/rxa3c/fast-jev-compaction",
+        "defaultPrompt": [
+          "Review my current Codex history with Jev.",
+          "Create a native Codex recovery note.",
+          "Find old tool results worth keeping."
+        ]
+      }
+    }
+  }
+}

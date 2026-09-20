@@ -1,6 +1,7 @@
 # fast-jev-compaction
 
-Claude Code plugin that replaces the compaction summary with Jev decisions:
+Claude Code and Codex context plugins that use Jev decisions instead of a
+generic history summary:
 every tool call and result is scored in one fast request, stale ones are
 dropped or truncated, everything kept stays verbatim. Also usable as an npm
 library.
@@ -14,9 +15,27 @@ calls and tool results Jev says are no longer needed, and it asks Jev while
 showing it the whole conversation. User and assistant text stays verbatim and
 in order.
 
-The repository is both an npm package (`src/`) and a Claude Code plugin
-(`hooks/`, `.claude-plugin/`) that uses the package to replace Claude Code's
-built-in compaction summary with the original messages.
+The repository is both an npm package (`src/`) and host plugins. The Claude
+Code plugin lives in (`hooks/`, `.claude-plugin/`); the Codex package lives in
+(`.codex-plugin/`, `hooks/`, `skills/`, and the Codex adapter in `src/`). Both
+hosts use the same Jev compaction core.
+
+## Host adapter architecture
+
+The Jev policy is host-neutral. `src/compact.ts` owns state fitting, batching,
+thresholds, decisions, and fallback behavior. `src/adapters.ts` defines the
+small boundary that every host integration implements:
+
+1. `project` maps a host transcript to the shared `Message[]` shape.
+2. The shared core asks Jev the call/result questions.
+3. `apply` materializes the result using host-specific handles, notes, or
+   lifecycle output. The adapter declares whether that output replaces the
+   host context or augments it with recovery information.
+
+Claude Code materializes a replacement `SessionMessage[]`. Codex materializes
+a plan and recovery note while leaving Codex's native history and compaction
+state untouched. A future IDE adapter only needs to implement this boundary;
+it should not copy the Jev request or compaction policy.
 
 ## How it works
 
@@ -161,6 +180,77 @@ could not remove enough (short sessions, or when it fails).
 To run from a checkout without installing: `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude --plugin-dir .`
 from the repository root. No publishing step is required; the marketplace is
 just the repo's `.claude-plugin/marketplace.json`.
+
+## Codex support
+
+The Claude Code hook is not reused directly in Codex: the two hosts expose
+different lifecycle events and context representations. The Codex plugin uses
+the same host-neutral Jev core through a Codex adapter and lifecycle hooks.
+
+Before native Codex compaction, `PreCompact` reads only the active context
+window from the current rollout: the latest `compacted` checkpoint's
+`replacement_history` plus the active `response_item` tail. It sends a fitted
+decision state to Jev, not the raw rollout. Jev results are stored as a pending
+recovery note under `PLUGIN_DATA`; native compaction is never blocked or
+rewritten. After `SessionStart(source=compact)`, the note is injected as
+additional context, while Codex's native history, notes, and opaque compaction
+state remain the source of truth.
+
+The automatic path reads the TypeSafe key from the generated `.env` file or
+from the hook process environment. For an installed plugin, use the user-level
+config file `~/.config/fast-jev-compaction/.env` so the key is not tied to the
+plugin cache directory:
+
+```sh
+npm install
+npm run build
+# .env has been generated; if it is missing, run: cp .env.example .env
+# Edit .env and set TYPESAFE_API_KEY=<your key>
+# Installed plugin alternative: edit ~/.config/fast-jev-compaction/.env
+```
+
+Install the repository as a Codex plugin, then review and trust the lifecycle
+hooks from `/hooks`. After changing the plugin, start a new Codex task so the
+new hook bundle is loaded. The portable root `plugin.json` selects
+`hooks/codex-hooks.json`; `hooks/hooks.json` remains the compatibility/default
+entry point and includes the existing Claude module in `hooks/fast-jev.ts`.
+
+The CLI remains available for manual diagnostics and offline plan inspection:
+
+```sh
+TYPESAFE_API_KEY="<your key>" node dist/codex-cli.js plan \
+  --rollout ~/.codex/sessions/<session>.jsonl \
+  --output /tmp/fast-jev-plan.json \
+  --note /tmp/fast-jev-note.md
+```
+
+The library entry point is available as `fast-jev-compaction/codex`, and the
+explicit `fast-jev-codex` skill is useful for manual review when a lifecycle
+hook is unavailable. The automatic hook and the skill both use
+`history.read_item` for exact details and never edit the rollout JSONL.
+
+Hook configuration can be stored in the ignored `.env` file generated from
+`.env.example`, or supplied as environment variables. Secrets stay out of
+tracked plugin files:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `TYPESAFE_API_KEY` | unset | TypeSafe authentication; required when Jev has candidates to score |
+| `FAST_JEV_MODEL` | `jev-latest` | Jev model |
+| `FAST_JEV_GOAL` | inferred from recent user prompts | Task goal sent with the fitted state |
+| `FAST_JEV_MIN_REDUCTION_RATIO` | `0.25` | Minimum reduction before the note is accepted |
+| `FAST_JEV_NOTE_RESULT_CHARS` | `800` | Exact result characters copied into the recovery note |
+| `FAST_JEV_KEEP_THRESHOLD` | `0.5` | Jev probability threshold |
+| `FAST_JEV_PRESERVE_RECENT_MESSAGES` | `6` | Recent messages pinned from deletion decisions |
+| `FAST_JEV_MAX_STATE_TOKENS` | `25000` | Fitted Jev state ceiling |
+| `FAST_JEV_MAX_REQUEST_TOKENS` | `30000` | Fitted request ceiling |
+| `FAST_JEV_TRUNCATE_HEAD_CHARS` | `300` | Result head retained for a dropped result |
+| `FAST_JEV_CONFIG` | unset | Optional path to another env-style config file |
+| `PLUGIN_DATA` | host-defined | Directory for the pending per-session recovery note |
+
+This integration deliberately advises Codex's native context manager instead
+of replacing it. Jev makes structured keep/drop decisions; Codex owns context
+windows, opaque compaction state, and note-based recovery.
 
 ## Development
 

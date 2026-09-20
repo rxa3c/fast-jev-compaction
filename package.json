@@ -11,10 +11,26 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./codex": {
+      "types": "./dist/codex.d.ts",
+      "import": "./dist/codex.js"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "import": "./dist/config.js"
     }
+  },
+  "bin": {
+    "fast-jev-codex": "dist/codex-cli.js"
   },
   "files": [
     "dist",
+    "hooks",
+    "skills",
+    ".codex-plugin",
+    ".env.example",
+    "plugin.json",
     "README.md",
     "LICENSE"
   ],

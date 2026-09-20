@@ -8,7 +8,8 @@ import type {
   TurnCompleteInput,
 } from 'claude-code';
 
-import { compact, reductionRatio, resolveOptions } from '../src/compact.js';
+import { reductionRatio, resolveOptions } from '../src/compact.js';
+import { compactWithAdapter } from '../src/adapters.js';
 import { buildJevRequest, DEFAULT_MODEL, parseJevResponse } from '../src/request.js';
 import type {
   CompactOptions,
@@ -168,8 +169,27 @@ export async function compactSession(
   fetchFn: HookFetch,
 ): Promise<SessionCompaction> {
   if (!config.apiKey) throw new Error('TYPESAFE_API_KEY is not configured');
-  const result = await compact(messages, jevAsker(fetchFn, config.apiKey, config.model), config);
-  return { result, messages: toSessionMessages(messages, result.messages) };
+  const adapter = {
+    name: 'claude-code',
+    materialization: 'replace' as const,
+    project(input: readonly SessionMessage[]) {
+      return { messages: input as readonly Message[] };
+    },
+    apply(
+      input: readonly SessionMessage[],
+      _projection: { messages: readonly Message[] },
+      result: CompactResult,
+    ) {
+      return toSessionMessages(input, result.messages);
+    },
+  };
+  const output = await compactWithAdapter(
+    adapter,
+    messages,
+    jevAsker(fetchFn, config.apiKey, config.model),
+    config,
+  );
+  return { result: output.result, messages: output.output };
 }
 
 function percent(ratio: number): string {

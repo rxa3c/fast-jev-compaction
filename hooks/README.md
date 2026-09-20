@@ -86,3 +86,13 @@ References:
 - [Claude Code plugins](https://code.claude.com/docs/en/plugins)
 - [Claude Code plugins reference](https://code.claude.com/docs/en/plugins-reference)
 - [Claude Code hooks](https://code.claude.com/docs/en/hooks)
+
+## Codex lifecycle hooks
+
+The same directory also ships the Codex hook entrypoints. The portable root
+`plugin.json` selects `hooks/codex-hooks.json`; the root `hooks/hooks.json`
+keeps the Codex definition alongside the existing Claude function-hook module
+for compatibility with older plugin loaders. `dist/codex-hook.js` runs
+`PreCompact` and `SessionStart(source=compact)`. It never blocks native Codex
+compaction or edits the rollout JSONL. Review and trust the hook definition in
+Codex with `/hooks` before relying on automatic Jev calls.
