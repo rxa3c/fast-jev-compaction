@@ -1,6 +1,6 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "name": "fast-jev-codex",
+  "name": "fast-jev-compaction",
   "version": "0.2.0",
   "description": "Jev-guided context compaction for Claude Code and Codex with native history and notes recovery.",
   "author": {

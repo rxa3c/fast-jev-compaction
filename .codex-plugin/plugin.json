@@ -1,5 +1,5 @@
 {
-  "name": "fast-jev-codex",
+  "name": "fast-jev-compaction",
   "version": "0.2.0",
   "description": "Jev-guided Codex compaction support that preserves high-value tool history through native context rollover.",
   "author": {
