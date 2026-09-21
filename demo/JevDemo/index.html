@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>fast-jev-codex | Live Trace</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand-lockup">
+          <span class="status-dot" aria-hidden="true"></span>
+          <div>
+            <h1>fast-jev-codex <span>LIVE TRACE</span></h1>
+            <p>Codex lifecycle events and Jev decisions</p>
+          </div>
+        </div>
+        <div class="toolbar" aria-label="Viewer actions">
+          <button id="refresh-button" class="icon-button" type="button" title="Refresh events">
+            <span aria-hidden="true">↻</span>
+            <span>Refresh</span>
+          </button>
+          <button id="clear-button" class="icon-button danger" type="button" title="Clear recorded events">
+            <span aria-hidden="true">⌫</span>
+            <span>Clear</span>
+          </button>
+        </div>
+      </header>
+
+      <section class="overview" aria-label="Trace overview">
+        <div class="metric">
+          <span class="metric-label">EVENTS</span>
+          <strong id="event-count">0</strong>
+        </div>
+        <div class="metric">
+          <span class="metric-label">LATEST PHASE</span>
+          <strong id="latest-phase">Waiting</strong>
+        </div>
+        <div class="metric wide">
+          <span class="metric-label">TRACE FILE</span>
+          <strong id="trace-file">Connecting...</strong>
+        </div>
+        <div class="connection-state" id="connection-state">
+          <span class="connection-light" aria-hidden="true"></span>
+          <span>Connecting</span>
+        </div>
+      </section>
+
+      <section class="workspace" aria-label="Event stream and details">
+        <aside class="event-panel">
+          <div class="panel-heading">
+            <div>
+              <h2>EVENT STREAM</h2>
+              <p id="last-updated">Waiting for trace data</p>
+            </div>
+            <span class="polling-label">POLLING</span>
+          </div>
+          <div id="event-list" class="event-list" role="listbox" aria-label="Codex trace events"></div>
+        </aside>
+
+        <article id="event-detail" class="detail-panel" aria-live="polite"></article>
+      </section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

@@ -89,12 +89,14 @@ References:
 
 ## Codex lifecycle hooks
 
-The same directory also ships the Codex hook entrypoints. The portable root
-`plugin.json` selects `hooks/codex-hooks.json`; the root `hooks/hooks.json`
-keeps the Codex definition alongside the existing Claude function-hook module
-for compatibility with older plugin loaders. `dist/codex-hook.js` runs
-`PreCompact` and `SessionStart` lifecycle events. It records a bounded local
-JSONL trace at `~/.config/fast-jev-compaction/events.jsonl` for the optional
-macOS live viewer, while never blocking native Codex compaction or editing the
-rollout JSONL. Review and trust the hook definition in Codex with `/hooks`
-before relying on automatic Jev calls.
+The same directory also ships the Codex hook entrypoints. The current Codex
+loader reads `.codex-plugin/hooks.json`; the portable root `plugin.json`
+selects `hooks/codex-hooks.json` for newer marketplace loaders. The root
+`hooks/hooks.json` keeps the Codex definition alongside the existing Claude
+function-hook module for older loaders. `dist/codex-hook.js` runs `PreCompact`
+and `SessionStart` lifecycle events using `CODEX_PLUGIN_ROOT`. It records a
+bounded local JSONL trace at
+`~/.config/fast-jev-compaction/events.jsonl` for the optional local web viewer,
+while never blocking native Codex compaction or editing the rollout JSONL.
+Review and trust the hook definition in Codex with `/hooks` before relying on
+automatic Jev calls.

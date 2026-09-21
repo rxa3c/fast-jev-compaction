@@ -29,7 +29,7 @@ function expandPath(path: string, environment: Environment): string {
   return isAbsolute(path) ? path : resolve(path);
 }
 
-/** Stable local event stream consumed by the optional live macOS viewer. */
+/** Stable local event stream consumed by the optional live web viewer. */
 export function codexTracePath(environment: Environment = process.env): string {
   const configured = environment.FAST_JEV_TRACE_FILE?.trim();
   if (configured) return expandPath(configured, environment);

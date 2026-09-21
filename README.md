@@ -210,12 +210,15 @@ npm run build
 ```
 
 Install the repository as a Codex plugin, then review and trust the lifecycle
-hooks from `/hooks`. After changing the plugin, start a new Codex task so the
-new hook bundle is loaded. The portable root `plugin.json` selects
-`hooks/codex-hooks.json`; `hooks/hooks.json` remains the compatibility/default
-entry point and includes the existing Claude module in `hooks/fast-jev.ts`.
-The Git-installed plugin runs the committed `dist/*.js` runtime, so run
-`npm run build` before publishing changes.
+hooks from `/hooks`. The current Codex loader reads the compatibility manifest
+under `.codex-plugin/`: `.codex-plugin/plugin.json` and
+`.codex-plugin/hooks.json`. The portable root `plugin.json` and
+`hooks/codex-hooks.json` are also included for newer marketplace loaders, while
+`hooks/hooks.json` keeps the existing Claude module and an older Codex fallback.
+After changing or reinstalling the plugin, fully restart Codex so its app-server
+reloads the plugin bundle; starting a new task alone does not reload an already
+running app-server. The Git-installed plugin runs the committed `dist/*.js`
+runtime, so run `npm run build` before publishing changes.
 
 The CLI remains available for manual diagnostics and offline plan inspection:
 
@@ -247,7 +250,7 @@ tracked plugin files:
 | `FAST_JEV_MAX_STATE_TOKENS` | `25000` | Fitted Jev state ceiling |
 | `FAST_JEV_MAX_REQUEST_TOKENS` | `30000` | Fitted request ceiling |
 | `FAST_JEV_TRUNCATE_HEAD_CHARS` | `300` | Result head retained for a dropped result |
-| `FAST_JEV_TRACE_FILE` | `~/.config/fast-jev-compaction/events.jsonl` | Optional local JSONL trace consumed by the live viewer |
+| `FAST_JEV_TRACE_FILE` | `~/.config/fast-jev-compaction/events.jsonl` | Optional local JSONL trace consumed by the live web viewer |
 | `FAST_JEV_CONFIG` | unset | Optional path to another env-style config file |
 | `PLUGIN_DATA` | host-defined | Directory for the pending per-session recovery note |
 
@@ -269,20 +272,21 @@ TYPESAFE_API_KEY="$(cat ~/.typesafe_key)" npm run demo
 The unit tests use a fake Jev and never contact TypeSafe. The demo is the live
 network check.
 
-## Live demo (macOS)
+## Live demo (web)
 
-`demo/JevDemo` is a native SwiftUI viewer for the real Codex hook trace. It
-waits for `PreCompact`, shows the rollout parsing and TypeSafe request, renders
+`demo/JevDemo` is a local browser viewer for the real Codex hook trace. It
+waits for `PreCompact`, shows rollout parsing and the TypeSafe request, renders
 the returned Jev decisions for each tool call, and then shows the recovery note
 being loaded at `SessionStart(source=compact)`. The viewer itself never sees
 the API key and never makes the TypeSafe request; the Codex hook does that.
 
 ```sh
-demo/JevDemo/build.sh             # builds and launches the live viewer
-# Start a new Codex session and trigger native manual or automatic compaction.
+demo/JevDemo/build.sh             # starts the local server and opens the viewer
+# Open http://127.0.0.1:4317 if the browser does not open automatically.
+# Start a Codex session and trigger native manual or automatic compaction.
 ```
 
-The viewer reads `~/.config/fast-jev-compaction/events.jsonl`. Use the trash
-button before a test to clear old events. There is no scripted fallback in this
-viewer: an empty window means that no real Codex lifecycle event has arrived
-yet.
+The browser viewer reads `~/.config/fast-jev-compaction/events.jsonl` through a
+localhost-only Node server. Use the `Clear` button before a test to remove old
+events. There is no scripted fallback: an empty event stream means that no real
+Codex lifecycle event has arrived yet.
