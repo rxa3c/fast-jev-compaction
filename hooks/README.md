@@ -91,12 +91,11 @@ References:
 
 The same directory also ships the Codex hook entrypoints. The current Codex
 loader reads the top-level `hooks` field from `.codex-plugin/plugin.json`,
-which selects `hooks/codex-hooks.json`. The portable root `plugin.json` uses
-the equivalent `extensions.com.openai.hooks` field for newer marketplace
-loaders. The root `hooks/hooks.json` keeps the existing Claude function-hook
-module, and `.codex-plugin/hooks.json` remains a standalone compatibility
-fallback. `dist/codex-hook.js` runs `PreCompact` and `SessionStart` using
-`CODEX_PLUGIN_ROOT`. It records a bounded local JSONL trace at
+which selects `hooks/codex-hooks.json`. A root Agent Plugins schema manifest
+must not shadow this entry point: Codex currently skips hooks for that format.
+The root `hooks/hooks.json` keeps the existing Claude function-hook module.
+`dist/codex-hook.js` runs `PreCompact` and `SessionStart` using
+`PLUGIN_ROOT`. It records a bounded local JSONL trace at
 `~/.config/fast-jev-compaction/events.jsonl` for the optional local web viewer,
 while never blocking native Codex compaction or editing the rollout JSONL.
 Review and trust the hook definition in Codex with `/hooks` before relying on

@@ -32,7 +32,10 @@ function parseEnvFile(text: string): Record<string, string> {
       /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/,
     );
     if (!assignment || !isConfigKey(assignment[1])) continue;
-    values[assignment[1]] = parseValue(assignment[2]);
+    const value = parseValue(assignment[2]);
+    // Empty template credentials must not erase a key from the user's config.
+    if (assignment[1] === 'TYPESAFE_API_KEY' && !value.trim()) continue;
+    values[assignment[1]] = value;
   }
   return values;
 }

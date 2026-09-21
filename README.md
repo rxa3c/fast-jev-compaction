@@ -212,11 +212,10 @@ npm run build
 Install the repository as a Codex plugin, then review and trust the lifecycle
 hooks from `/hooks`. The current Codex loader reads the top-level `hooks` field
 from `.codex-plugin/plugin.json`, which points to
-`hooks/codex-hooks.json`. The portable root `plugin.json` and its
-`extensions.com.openai.hooks` field are also included for newer marketplace
-loaders. `hooks/hooks.json` remains the Claude-compatible entry point, while
-`.codex-plugin/hooks.json` is kept as a fallback for loaders that use the
-standalone compatibility file.
+`hooks/codex-hooks.json`. Do not add an Agent Plugins schema manifest at root
+`plugin.json`: Codex gives it precedence over the Codex manifest and currently
+skips lifecycle hooks for that format. Claude retains its separate
+`.claude-plugin/plugin.json` and function-hook module.
 After changing or reinstalling the plugin, fully restart Codex so its app-server
 reloads the plugin bundle; starting a new task alone does not reload an already
 running app-server. The Git-installed plugin runs the committed `dist/*.js`

@@ -1,4 +1,7 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -62,6 +65,41 @@ function fakeJev(answer: (name: string) => number): JevAsker {
 }
 
 describe('Codex lifecycle hook', () => {
+  it('ships a discoverable legacy manifest and commands using host-provided variables', async () => {
+    const root = fileURLToPath(new URL('../', import.meta.url));
+    // AgentPlugin-format root manifests shadow the legacy manifest and disable hooks.
+    expect(existsSync(join(root, 'plugin.json'))).toBe(false);
+    const manifest = JSON.parse(await readFile(join(root, '.codex-plugin/plugin.json'), 'utf8'));
+    expect(manifest.hooks).toBe('./hooks/codex-hooks.json');
+    const definitions = JSON.parse(await readFile(join(root, manifest.hooks), 'utf8'));
+    for (const path of ['hooks/hooks.json', '.codex-plugin/hooks.json']) {
+      const fallback = JSON.parse(await readFile(join(root, path), 'utf8'));
+      expect(fallback.hooks).toEqual(definitions.hooks);
+    }
+    const directory = await mkdtemp(join(tmpdir(), 'fast-jev-command-'));
+    try {
+      const result = spawnSync('/bin/sh', ['-c', definitions.hooks.SessionStart[0].hooks[0].command], {
+        cwd: directory,
+        env: {
+          PATH: process.env.PATH,
+          HOME: directory,
+          PLUGIN_ROOT: root,
+          PLUGIN_DATA: directory,
+          FAST_JEV_TRACE_FILE: join(directory, 'events.jsonl'),
+        },
+        input: JSON.stringify({ hook_event_name: 'SessionStart', session_id: 'command-test', source: 'startup', cwd: directory }),
+        encoding: 'utf8',
+        timeout: 10000,
+      });
+      expect(result.status, result.stderr).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({});
+      const trace = await readFile(join(directory, 'events.jsonl'), 'utf8');
+      expect(trace).toContain('session_start_received');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('loads an env-style config file without overriding explicit variables', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'fast-jev-config-'));
     const configPath = join(directory, 'fast-jev.env');
@@ -77,6 +115,27 @@ describe('Codex lifecycle hook', () => {
       });
       expect(environment.TYPESAFE_API_KEY).toBe('explicit-key');
       expect(environment.FAST_JEV_MODEL).toBe('jev-from-file');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('does not let a blank plugin API key erase the user config', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'fast-jev-config-'));
+    const userConfig = join(directory, '.config', 'fast-jev-compaction');
+    const pluginRoot = join(directory, 'plugin');
+    try {
+      await mkdir(userConfig, { recursive: true });
+      await mkdir(pluginRoot);
+      await writeFile(join(userConfig, '.env'), 'TYPESAFE_API_KEY=user-key\n');
+      for (const blank of ['', '""', "''", '"   "']) {
+        await writeFile(join(pluginRoot, '.env'), `TYPESAFE_API_KEY=${blank}\n`);
+        const environment = await loadConfigEnvironment({ HOME: directory, PLUGIN_ROOT: pluginRoot });
+        expect(environment.TYPESAFE_API_KEY).toBe('user-key');
+      }
+      await writeFile(join(pluginRoot, '.env'), 'TYPESAFE_API_KEY=plugin-key\n');
+      const environment = await loadConfigEnvironment({ HOME: directory, PLUGIN_ROOT: pluginRoot });
+      expect(environment.TYPESAFE_API_KEY).toBe('plugin-key');
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
