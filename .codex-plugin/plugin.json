@@ -11,6 +11,7 @@
   "license": "MIT",
   "keywords": ["codex", "context", "compaction", "history", "notes", "jev"],
   "skills": "./skills/",
+  "hooks": "./hooks/codex-hooks.json",
   "interface": {
     "displayName": "Fast Jev for Codex",
     "shortDescription": "Use Jev to select useful Codex history for notes",
