@@ -242,6 +242,7 @@ async function runPreCompact(input, environment, dependencies) {
             })),
         });
         if (ratio < config.minReductionRatio) {
+            const reason = `Jev reduction ${Math.round(ratio * 100)}% is below the configured ${Math.round(config.minReductionRatio * 100)}% minimum`;
             await savePendingBestEffort(statePath, {
                 schemaVersion: 1,
                 status: 'fallback',
@@ -249,12 +250,13 @@ async function runPreCompact(input, environment, dependencies) {
                 rolloutPath: input.transcript_path,
                 reductionRatio: ratio,
                 summary,
+                error: reason,
             });
-            return fallbackMessage(`Jev reduction ${Math.round(ratio * 100)}% is below the configured ${Math.round(config.minReductionRatio * 100)}% minimum`);
             await emitTrace(input, environment, dependencies, 'fallback', {
-                reason: `Jev reduction ${Math.round(ratio * 100)}% is below the configured ${Math.round(config.minReductionRatio * 100)}% minimum`,
+                reason,
                 summary,
             });
+            return fallbackMessage(reason);
         }
         const note = renderCodexRecoveryNote(plan);
         try {

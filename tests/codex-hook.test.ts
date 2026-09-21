@@ -222,6 +222,27 @@ describe('Codex lifecycle hook', () => {
     }
   });
 
+  it('records why a low-reduction plan has no recovery note', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'fast-jev-low-reduction-'));
+    const traceEvents: Array<Record<string, unknown>> = [];
+    const dependencies = {
+      dataRoot,
+      readRollout: async () => rolloutFixture(),
+      asker: fakeJev(() => 0.9),
+      trace: async (event: Record<string, unknown>) => { traceEvents.push(event); },
+    };
+    try {
+      const before = await runCodexHook({ session_id: 'low', hook_event_name: 'PreCompact', transcript_path: '/fixture' },
+        { FAST_JEV_PRESERVE_RECENT_MESSAGES: '0' }, dependencies);
+      expect(before.systemMessage).toContain('below the configured');
+      expect(traceEvents.find(event => event.event === 'fallback')?.reason).toContain('below the configured');
+      await runCodexHook({ session_id: 'low', hook_event_name: 'SessionStart', source: 'compact' }, {}, dependencies);
+      expect(traceEvents.find(event => event.event === 'recovery_note_missing')?.error).toContain('below the configured');
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true });
+    }
+  });
+
   it('falls back to native compaction when the TypeSafe key is missing', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'fast-jev-codex-hook-'));
     try {

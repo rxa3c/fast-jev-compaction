@@ -163,7 +163,8 @@ function parseCall(item: CodexResponseItem): ParsedCall | undefined {
     item.type === 'function_call'
       ? parseJsonObject(item.arguments)
       : item.type === 'custom_tool_call'
-        ? parseJsonObject(item.input)
+        ? parseJsonObject(item.input) ??
+          (typeof item.input === 'string' ? { input: item.input } : undefined)
         : parseJsonObject(item.action);
   return input ? { id, tool: toolName(item), input } : undefined;
 }

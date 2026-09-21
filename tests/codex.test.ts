@@ -64,6 +64,25 @@ function replacementHistory(): Record<string, unknown>[] {
 }
 
 describe('Codex adapter', () => {
+  it('pairs freeform Codex exec input with text content outputs', async () => {
+    const input = 'text(await tools.exec_command({cmd: "npm test"}));';
+    const lines = [
+      responseItem({ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Run tests.' }] }),
+      responseItem({ type: 'custom_tool_call', call_id: 'exec-1', name: 'exec', input }),
+      responseItem({ type: 'custom_tool_call_output', call_id: 'exec-1', output: [
+        { type: 'input_text', text: 'Tests passed' },
+        { type: 'input_text', text: 'Exit code: 0' },
+      ] }),
+    ];
+    const projection = projectActiveCodexWindow(selectActiveCodexWindow(lines));
+    expect(projection.callInputs.get('exec-1')).toEqual({ input });
+    expect(projection.resultTexts.get('exec-1')).toBe('Tests passed\nExit code: 0');
+    const plan = await buildCodexPlan(lines, fakeJev(() => 0.9), { preserveRecentMessages: 0 });
+    expect(plan.stats.calls).toBe(1);
+    expect(plan.stats.requests).toBeGreaterThan(0);
+    expect(renderCodexRecoveryNote(plan)).toContain('Tests passed');
+  });
+
   it('selects the latest replacement history and ignores older response items', () => {
     const lines: CodexRolloutLine[] = [
       responseItem({
